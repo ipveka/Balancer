@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  balancer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: balancer-app
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=production
+      - API__DEBUG=false
+      - API__CORS_ORIGINS=["*"]
+      - AI__FORECAST_FREQUENCY=weekly
+      - AI__DEFAULT_SERVICE_LEVEL=0.95
+      - AI__VRP_ALGORITHM=greedy
+    volumes:
+      - ./logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - balancer-network
+
+  # Optional: Redis for caching (future enhancement)
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: balancer-redis
+  #   ports:
+  #     - "6379:6379"
+  #   volumes:
+  #     - redis_data:/data
+  #   restart: unless-stopped
+  #   networks:
+  #     - balancer-network
+
+  # Optional: PostgreSQL database (future enhancement)
+  # postgres:
+  #   image: postgres:15-alpine
+  #   container_name: balancer-postgres
+  #   environment:
+  #     POSTGRES_DB: balancer
+  #     POSTGRES_USER: balancer
+  #     POSTGRES_PASSWORD: balancer_password
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   restart: unless-stopped
+  #   networks:
+  #     - balancer-network
+
+networks:
+  balancer-network:
+    driver: bridge
+
+volumes:
+  # redis_data:
+  # postgres_data:
+  logs:

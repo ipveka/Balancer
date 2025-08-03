@@ -1,0 +1,154 @@
+# Kubernetes Deployment Configuration for Balancer Platform
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: balancer
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: balancer-config
+  namespace: balancer
+data:
+  ENVIRONMENT: "production"
+  API__DEBUG: "false"
+  API__TITLE: "Balancer API"
+  API__VERSION: "1.0.0"
+  AI__FORECAST_FREQUENCY: "weekly"
+  AI__DEFAULT_SERVICE_LEVEL: "0.95"
+  AI__VRP_ALGORITHM: "greedy"
+  AI__FORECAST_HORIZON: "12"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: balancer-secrets
+  namespace: balancer
+type: Opaque
+data:
+  # Add base64 encoded secrets here
+  # Example: DATABASE_PASSWORD: <base64-encoded-password>
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: balancer-deployment
+  namespace: balancer
+  labels:
+    app: balancer
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: balancer
+  template:
+    metadata:
+      labels:
+        app: balancer
+    spec:
+      containers:
+      - name: balancer
+        image: balancer:latest
+        ports:
+        - containerPort: 8000
+        envFrom:
+        - configMapRef:
+            name: balancer-config
+        - secretRef:
+            name: balancer-secrets
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        volumeMounts:
+        - name: logs
+          mountPath: /app/logs
+      volumes:
+      - name: logs
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: balancer-service
+  namespace: balancer
+spec:
+  selector:
+    app: balancer
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8000
+  type: ClusterIP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: balancer-ingress
+  namespace: balancer
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+spec:
+  tls:
+  - hosts:
+    - api.yourdomain.com
+    secretName: balancer-tls
+  rules:
+  - host: api.yourdomain.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: balancer-service
+            port:
+              number: 80
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: balancer-hpa
+  namespace: balancer
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: balancer-deployment
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
